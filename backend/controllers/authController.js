@@ -2,7 +2,10 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import userModel from "../models/userModel.js";
 import transporter from "../config/nodemailer.js";
-import { EMAIL_VERIFY_TEMPLATE, PASSWORD_RESET_TEMPLATE } from '../config/emailTemplates.js';
+import {
+  EMAIL_VERIFY_TEMPLATE,
+  PASSWORD_RESET_TEMPLATE,
+} from "../config/emailTemplates.js";
 
 export const register = async (req, res) => {
   const { name, email, password } = req.body;
@@ -44,11 +47,13 @@ export const register = async (req, res) => {
       text: `Welcome to website. Your account has been created with email id: ${email}`,
     };
 
-    await transporter.sendMail(mailOptions);
-
-    return res
+    res
       .status(201)
       .json({ success: true, message: "User registered successfully" });
+
+    transporter.sendMail(mailOptions).catch((err) => {
+      console.error("Email failed", err);
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -142,11 +147,16 @@ export const sendVerifyOtp = async (req, res) => {
       from: process.env.SENDER_EMAIL,
       to: user.email,
       subject: "Account Verification OTP",
-      html: EMAIL_VERIFY_TEMPLATE.replace("{{otp}}", otp).replace("{{email}}", user.email) 
+      html: EMAIL_VERIFY_TEMPLATE.replace("{{otp}}", otp).replace(
+        "{{email}}",
+        user.email
+      ),
     };
 
     transporter.sendMail(mailOptions).catch((error) => {
       console.error("Failed to send verification email:", error);
+
+      return;
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -200,12 +210,18 @@ export const verifyEmail = async (req, res) => {
 
 // Check if user is authenticated
 export const isAuthenticated = async (req, res) => {
+  
   try {
-    return res.status(200).json({ success: true });
+    const userId = req.userId;
+    const user = await userModel.findById(userId);
+
+    if(!user){
+      return res.status(404).json({success: false, message: "User not found"});
+    }
+
+    return res.status(200).json({success:true});
   } catch (error) {
-    return res
-      .status(500)
-      .json({ success: false, message: "Account is already verified" });
+    return res.status(500).json({success: false, message: error.message});
   }
 };
 
@@ -239,15 +255,19 @@ export const sendResetOtp = async (req, res) => {
       from: process.env.SENDER_EMAIL,
       to: user.email,
       subject: "Password Reset OTP",
-      // text: `Your OTP for resetting your password is ${otp}. Use this OTP to proceed with resetting your password.`,
-      html: PASSWORD_RESET_TEMPLATE.replace("{{otp}}",otp).replace("{{email}}",user.email)
+      html: PASSWORD_RESET_TEMPLATE.replace("{{otp}}", otp).replace(
+        "{{email}}",
+        user.email
+      ),
     };
 
-    await transporter.sendMail(resetMailOptions);
+    res.status(200).json({ success: true, message: "OTP sent to your email" });
 
-    return res
-      .status(200)
-      .json({ success: true, message: "OTP sent to your email" });
+    await transporter.sendMail(resetMailOptions).catch(err => {
+      console.error('Reset OTP email failed', err);
+    });
+
+    return;
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -258,12 +278,10 @@ export const resetPassword = async (req, res) => {
   const { email, otp, newPassword } = req.body;
 
   if (!email || !otp || !newPassword) {
-    return res
-      .status(400)
-      .json({
-        success: false,
-        message: "Email, OTP and new password are required",
-      });
+    return res.status(400).json({
+      success: false,
+      message: "Email, OTP and new password are required",
+    });
   }
 
   try {
@@ -301,27 +319,28 @@ export const resetPassword = async (req, res) => {
   }
 };
 
-
 export const verifyResetOtp = async (req, res) => {
   const { email, otp } = req.body;
 
   try {
-    const user = await userModel.findOne({email});
+    const user = await userModel.findOne({ email });
 
-    if(!user){
-      return res.status(404).json({success : false, message: "User not found"});
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
-    if(user.resetOtp === "" || user.resetOtp !== otp){
-      return res.status(400).json({success: false, message: "Invalid OTP"});
+    if (user.resetOtp === "" || user.resetOtp !== otp) {
+      return res.status(400).json({ success: false, message: "Invalid OTP" });
     }
 
-    if(user.resetOtpExpireAt < Date.now()){
-      return res.status(400).json({success: false, message: "OTP Expired"});
+    if (user.resetOtpExpireAt < Date.now()) {
+      return res.status(400).json({ success: false, message: "OTP Expired" });
     }
 
-    return res.status(200).json({success: true, message: "OTP verified"});
+    return res.status(200).json({ success: true, message: "OTP verified" });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message});
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
